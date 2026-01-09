@@ -72,6 +72,7 @@ export class Lipsync {
   }
 
   update(): [number, number, number] {
+    // @ts-expect-error - Web Audio API type issue, works correctly at runtime
     this.analyser.getFloatFrequencyData(this.data);
     this.binAnalysis();
     this.lipAnalysis();

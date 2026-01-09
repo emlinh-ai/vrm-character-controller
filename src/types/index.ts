@@ -19,6 +19,7 @@ export interface AnimationDefinition {
 // VRM Model Props
 export interface VRMModelProps {
   vrmUrl: string;
+  basePath?: string;
   audioVolume?: number;
   audioCurrentTime?: number;
   audioDuration?: number;
@@ -32,6 +33,7 @@ export interface VRMModelProps {
   kiss?: number;
   lipsClosed?: number;
   jaw?: number;
+  animationRegistry?: Record<string, any>;
 }
 
 export interface VRMModelRef {
@@ -49,6 +51,7 @@ export interface VRMModelRef {
 // VRM Viewer Props
 export interface VRMViewerProps {
   vrmUrl?: string;
+  basePath?: string;
   isAISpeaking?: boolean;
   audioVolume?: number;
   audioCurrentTime?: number;
@@ -63,7 +66,14 @@ export interface VRMViewerProps {
   // Customization
   position?: [number, number, number];
   rotation?: [number, number, number];
+  scale?: number;
   lightIntensity?: number;
+  // Click-through support for desktop apps
+  onPointerOver?: () => void;
+  onPointerOut?: () => void;
+  onPointerDown?: (event: any) => void;
+  onPointerUp?: (event: any) => void;
+  animationRegistry?: Record<string, any>;
 }
 
 // Animation Loader Types

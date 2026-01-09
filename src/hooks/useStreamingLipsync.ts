@@ -179,7 +179,10 @@ export const useStreamingLipsync = (options?: StreamingLipsyncOptions) => {
 
         if (!useExternalRef.current) {
           const audioBuffer = audioContext.createBuffer(1, audioData.length, sampleRate);
-          audioBuffer.copyToChannel(audioData, 0);
+          const channelData = audioBuffer.getChannelData(0);
+          for (let i = 0; i < audioData.length; i++) {
+            channelData[i] = audioData[i];
+          }
 
           const sourceNode = audioContext.createBufferSource();
           sourceNode.buffer = audioBuffer;

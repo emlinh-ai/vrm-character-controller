@@ -16,7 +16,6 @@ export { useTalkingAnimationSelector } from './hooks/useTalkingAnimationSelector
 
 // Constants
 export {
-  ANIMATION_REGISTRY,
   registerAnimation,
   getAnimationById,
   getPreloadAnimations,

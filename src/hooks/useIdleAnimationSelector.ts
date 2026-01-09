@@ -5,7 +5,7 @@ import { getRandomIdleAnimation } from '../constants/animation-registry';
  * Hook đơn giản để select idle animation khác với animation hiện tại/trước đó
  * Không có timer - chỉ là pure helper cho logic chọn animation
  */
-export const useIdleAnimationSelector = () => {
+export const useIdleAnimationSelector = (registry: Record<string, any>) => {
   const currentIdleRef = useRef<string | null>(null);
   const previousIdleRef = useRef<string | null>(null);
 
@@ -13,7 +13,7 @@ export const useIdleAnimationSelector = () => {
    * Get next idle animation (random, excluding current và previous)
    */
   const getNextIdleAnimation = useCallback((): string | null => {
-    const randomIdle = getRandomIdleAnimation(currentIdleRef.current || undefined);
+    const randomIdle = getRandomIdleAnimation(registry, currentIdleRef.current || undefined);
     if (!randomIdle) return null;
 
     previousIdleRef.current = currentIdleRef.current;
@@ -34,7 +34,7 @@ export const useIdleAnimationSelector = () => {
    * Get initial random idle animation
    */
   const getInitialIdle = useCallback((): string | null => {
-    const randomIdle = getRandomIdleAnimation();
+    const randomIdle = getRandomIdleAnimation(registry);
     if (randomIdle) {
       currentIdleRef.current = randomIdle.id;
       return randomIdle.id;

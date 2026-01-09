@@ -40,7 +40,7 @@ export const useVrmAnimationPlayer = ({
     const wasPlaying = playingRef.current;
     const currentTime = activeActionRef.current?.action?.time || 0;
 
-    mixerRef.current = new THREE.AnimationMixer(vrm.scene);
+    mixerRef.current = new THREE.AnimationMixer(vrm.scene as any);
     actionsCache.current.clear();
 
     if (currentClip && wasPlaying) {
@@ -84,7 +84,7 @@ export const useVrmAnimationPlayer = ({
     }
   }, [defaultClip, vrm, loop, getOrCreateAction]);
 
-  const playAnimation = (clip: THREE.AnimationClip | null, shouldLoop: boolean = true, customTransitionDuration?: number) => {
+  const playAnimation = useCallback((clip: THREE.AnimationClip | null, shouldLoop: boolean = true, customTransitionDuration?: number) => {
     if (!clip || !vrm || !mixerRef.current) return;
 
     const effectiveTransition = customTransitionDuration !== undefined ? customTransitionDuration : transitionDuration;
@@ -127,91 +127,75 @@ export const useVrmAnimationPlayer = ({
     if (activeActionRef.current && !isSameClip) {
       const oldAction = activeActionRef.current.action;
 
-      oldAction.setLoop(THREE.LoopOnce, 1);
-      oldAction.clampWhenFinished = true;
-      oldAction.fadeOut(effectiveTransition);
-
+      // Ensure new action is ready
+      newAction.enabled = true;
+      newAction.setEffectiveTimeScale(1);
+      newAction.setEffectiveWeight(1);
       newAction.play();
-      newAction.fadeIn(effectiveTransition);
 
-      setTimeout(() => {
-        oldAction.stop();
-      }, effectiveTransition * 1000 + 100);
-    } else if (isSameClip) {
-      newAction.play();
+      // Crossfade from old to new
+      oldAction.crossFadeTo(newAction, effectiveTransition, true);
     } else {
       newAction.play();
-      newAction.fadeIn(effectiveTransition);
+      if (!isSameClip) {
+        newAction.fadeIn(effectiveTransition);
+      }
     }
 
     activeActionRef.current = { action: newAction, clip };
     playingRef.current = true;
     hasCompletedRef.current = false;
     hasTriggeredLoopPreventionRef.current = false;
-  };
+  }, [vrm, transitionDuration, getOrCreateAction, onAnimationComplete]);
 
-  const pause = () => {
+  const pause = useCallback(() => {
     playingRef.current = false;
     if (activeActionRef.current) {
       activeActionRef.current.action.paused = true;
     }
-  };
+  }, []);
 
-  const resume = () => {
+  const resume = useCallback(() => {
     playingRef.current = true;
     if (activeActionRef.current) {
       activeActionRef.current.action.paused = false;
     }
-  };
+  }, []);
 
-  const stop = () => {
+  const stop = useCallback(() => {
     playingRef.current = false;
     if (activeActionRef.current) {
       activeActionRef.current.action.stop();
     }
-  };
+  }, []);
 
   useFrame((_, delta) => {
+    if (mixerRef.current && playingRef.current) {
+      mixerRef.current.update(delta);
+    }
+
     if (vrm) {
       vrm.update(delta);
     }
 
-    if (mixerRef.current && playingRef.current) {
-      mixerRef.current.update(delta);
+    // Logic xử lý loop repeat prevention và notification
+    if (
+      mixerRef.current &&
+      playingRef.current &&
+      activeActionRef.current &&
+      !hasTriggeredLoopPreventionRef.current &&
+      onLoopAboutToRepeat
+    ) {
+      const action = activeActionRef.current.action;
+      const clip = activeActionRef.current.clip;
+      const effectiveWeight = action.getEffectiveWeight();
 
-      if (activeActionRef.current && !hasCompletedRef.current) {
-        const action = activeActionRef.current.action;
-        const clip = activeActionRef.current.clip;
+      if (action.loop === THREE.LoopRepeat && effectiveWeight > 0.9) {
+        const timeUntilEnd = clip.duration - (action.time % clip.duration);
 
-        const effectiveWeight = action.getEffectiveWeight();
-        if (
-          action.loop === THREE.LoopOnce &&
-          action.time >= clip.duration - 0.01 &&
-          effectiveWeight > 0.5
-        ) {
-          hasCompletedRef.current = true;
-          if (onAnimationComplete) {
-            onAnimationComplete();
-          }
-        }
-      }
-
-      if (
-        activeActionRef.current &&
-        !hasTriggeredLoopPreventionRef.current &&
-        onLoopAboutToRepeat
-      ) {
-        const action = activeActionRef.current.action;
-        const clip = activeActionRef.current.clip;
-        const effectiveWeight = action.getEffectiveWeight();
-
-        if (action.loop === THREE.LoopRepeat && effectiveWeight > 0.9) {
-          const timeUntilEnd = clip.duration - action.time;
-
-          if (timeUntilEnd <= loopPreventionThreshold && timeUntilEnd > 0) {
-            hasTriggeredLoopPreventionRef.current = true;
-            onLoopAboutToRepeat();
-          }
+        if (timeUntilEnd <= loopPreventionThreshold && timeUntilEnd > 0) {
+          hasTriggeredLoopPreventionRef.current = true;
+          onLoopAboutToRepeat();
         }
       }
     }

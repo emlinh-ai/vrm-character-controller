@@ -89,7 +89,8 @@ export function useChatAudioWebSocket(options: UseChatAudioWebSocketOptions): Ch
     const ctx = playbackAudioContextRef.current!;
 
     const buffer = ctx.createBuffer(1, float32.length, 24000);
-    buffer.copyToChannel(float32, 0);
+    const channelData = buffer.getChannelData(0);
+    channelData.set(float32);
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;

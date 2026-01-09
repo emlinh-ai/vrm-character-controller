@@ -9,6 +9,7 @@ import type { VRMViewerProps, VRMModelRef } from '../types';
  */
 const VRMViewer: React.FC<VRMViewerProps> = ({
   vrmUrl = 'emlinh-vroid-1.1.vrm',
+  basePath = 'models',
   isAISpeaking = false,
   audioVolume = 0,
   audioCurrentTime = 0,
@@ -22,7 +23,13 @@ const VRMViewer: React.FC<VRMViewerProps> = ({
   jaw = 0,
   position = [0.55, -1.25, 0],
   rotation = [0, -1.75 / Math.PI, 0],
+  scale = 1,
   lightIntensity = 1,
+  onPointerOver,
+  onPointerOut,
+  onPointerDown,
+  onPointerUp,
+  animationRegistry = {},
 }) => {
   const vrmModelRef = useRef<VRMModelRef>(null);
 
@@ -46,10 +53,19 @@ const VRMViewer: React.FC<VRMViewerProps> = ({
     <>
       <ambientLight intensity={lightIntensity * 0.5} />
       <directionalLight position={[10, 10, 5]} intensity={lightIntensity} />
-      <group position={position} rotation={rotation}>
+      <group 
+        position={position} 
+        rotation={rotation} 
+        scale={scale}
+        onPointerOver={onPointerOver}
+        onPointerOut={onPointerOut}
+        onPointerDown={onPointerDown}
+        onPointerUp={onPointerUp}
+      >
         <VRMModel
           ref={vrmModelRef}
           vrmUrl={vrmUrl}
+          basePath={basePath}
           audioVolume={audioVolume}
           audioCurrentTime={audioCurrentTime}
           audioDuration={audioDuration}
@@ -59,6 +75,7 @@ const VRMViewer: React.FC<VRMViewerProps> = ({
           kiss={kiss}
           lipsClosed={lipsClosed}
           jaw={jaw}
+          animationRegistry={animationRegistry}
         />
       </group>
     </>

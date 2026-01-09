@@ -32,7 +32,9 @@ export function remapMixamoAnimationToVrm(vrm: VRM, asset: MixamoAsset): THREE.A
   }
 
   const motionHipsHeight = hipsNode.position.y;
+  // @ts-ignore
   const vrmHipsY = vrm.humanoid?.getNormalizedBoneNode('hips')?.getWorldPosition(_vec3).y ?? 0;
+  // @ts-ignore
   const vrmRootY = vrm.scene.getWorldPosition(_vec3).y;
   const vrmHipsHeight = Math.abs(vrmHipsY - vrmRootY);
   const hipsPositionScale = vrmHipsHeight / motionHipsHeight;
@@ -41,6 +43,7 @@ export function remapMixamoAnimationToVrm(vrm: VRM, asset: MixamoAsset): THREE.A
     const trackSplitted = track.name.split('.');
     const mixamoRigName = trackSplitted[0];
     const vrmBoneName = mixamoVRMRigMap[mixamoRigName];
+    // @ts-ignore
     const vrmNodeName = vrm.humanoid?.getNormalizedBoneNode(vrmBoneName)?.name;
     const mixamoRigNode = asset.getObjectByName(mixamoRigName);
 

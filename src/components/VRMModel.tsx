@@ -1,10 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { forwardRef, useImperativeHandle, useState, useEffect, useMemo } from 'react';
+import { forwardRef, useImperativeHandle, useState, useEffect, useMemo, useCallback } from 'react';
 import { useGLTF } from '@react-three/drei';
 import { VRMLoaderPlugin } from '@pixiv/three-vrm';
 import { VRMAnimationLoaderPlugin } from '@pixiv/three-vrm-animation';
 import { useVrmBlink } from '../hooks/useVrmBlink';
 import { useVrmLookAt } from '../hooks/useVrmLookAt';
+import { useVrmLipsync } from '../hooks/useVrmLipsync';
 import { useVrmAnimationLoader } from '../hooks/useVrmAnimationLoader';
 import { useVrmAnimationPlayer } from '../hooks/useVrmAnimationPlayer';
 import { useVrmExpression } from '../hooks/useVrmExpression';
@@ -16,6 +17,7 @@ const VRMModel = forwardRef<VRMModelRef, VRMModelProps>(
   (
     {
       vrmUrl,
+      basePath = 'models',
       audioVolume = 0,
       isAudioPlaying = false,
       positions = [0, 0, 0],
@@ -27,6 +29,7 @@ const VRMModel = forwardRef<VRMModelRef, VRMModelProps>(
       kiss = 0,
       lipsClosed = 0,
       jaw = 0,
+      animationRegistry = {},
     },
     ref
   ) => {
@@ -39,7 +42,7 @@ const VRMModel = forwardRef<VRMModelRef, VRMModelProps>(
     >(null);
 
     const { scene, userData } = useGLTF(
-      `models/${vrmUrl}`,
+      `${basePath}/${vrmUrl}`,
       'https://www.gstatic.com/draco/versioned/decoders/1.5.6/',
       undefined,
       (loader: any) => {
@@ -55,12 +58,12 @@ const VRMModel = forwardRef<VRMModelRef, VRMModelProps>(
       preloadedAnimations,
       preloadError,
       isCriticalAnimationReady,
-    } = useVrmAnimationLoader(vrm);
+    } = useVrmAnimationLoader(vrm, animationRegistry);
 
-    const { getNextIdleAnimation, setCurrentIdle, getInitialIdle } = useIdleAnimationSelector();
+    const { getNextIdleAnimation, setCurrentIdle, getInitialIdle } = useIdleAnimationSelector(animationRegistry);
 
     const defaultClip = useMemo(() => {
-      return getLoadedAnimation('standingIdle') || null;
+      return getLoadedAnimation('idle') || null;
     }, [getLoadedAnimation, preloadedAnimations]);
 
     const handleAnimationComplete = () => {
@@ -68,7 +71,7 @@ const VRMModel = forwardRef<VRMModelRef, VRMModelProps>(
         setHasPlayedGreeting(true);
         setHasTransitionedToIdle(true);
 
-        const initialIdleId = getInitialIdle() || 'standingIdle';
+        const initialIdleId = getInitialIdle() || 'idle';
 
         loadAnimation(initialIdleId)
           .then((idleClip) => {
@@ -84,7 +87,7 @@ const VRMModel = forwardRef<VRMModelRef, VRMModelProps>(
           })
           .catch(console.error);
       } else {
-        const nextIdleId = getNextIdleAnimation() || getInitialIdle() || 'standingIdle';
+        const nextIdleId = getNextIdleAnimation() || getInitialIdle() || 'idle';
         loadAnimation(nextIdleId)
           .then((idleClip) => {
             if (idleClip) {
@@ -101,15 +104,23 @@ const VRMModel = forwardRef<VRMModelRef, VRMModelProps>(
       }
     };
 
-    const handleLoopAboutToRepeat = async () => {
+    const { playAnimation } = useVrmAnimationPlayer({
+      vrm,
+      defaultClip,
+      onAnimationComplete: handleAnimationComplete,
+      transitionDuration: 0.5,
+      onLoopAboutToRepeat: () => handleLoopAboutToRepeat(),
+      loopPreventionThreshold: 2.0,
+    });
+
+    const handleLoopAboutToRepeat = useCallback(async () => {
       if (currentAnimationCategory === 'idle') {
         const nextIdleId = getNextIdleAnimation();
         if (nextIdleId) {
           const nextIdleClip = await loadAnimation(nextIdleId);
           if (nextIdleClip) {
-            playAnimation(nextIdleClip, true, 1.5);
+            playAnimation(nextIdleClip, true, 1.0); // Tăng transition lên 1s để mượt hơn
             setCurrentIdle(nextIdleId);
-            setCurrentAnimationCategory('idle');
           }
         }
       }
@@ -117,16 +128,7 @@ const VRMModel = forwardRef<VRMModelRef, VRMModelProps>(
       if (onLoopAboutToRepeat) {
         onLoopAboutToRepeat();
       }
-    };
-
-    const { playAnimation } = useVrmAnimationPlayer({
-      vrm,
-      defaultClip,
-      onAnimationComplete: handleAnimationComplete,
-      transitionDuration: 0.5,
-      onLoopAboutToRepeat: handleLoopAboutToRepeat,
-      loopPreventionThreshold: 2.0,
-    });
+    }, [currentAnimationCategory, getNextIdleAnimation, loadAnimation, playAnimation, setCurrentIdle, onLoopAboutToRepeat]);
 
     const { currentExpression, setCurrentExpression } = useVrmExpression({
       vrm,
@@ -168,13 +170,13 @@ const VRMModel = forwardRef<VRMModelRef, VRMModelProps>(
       shouldLoop?: boolean,
       transitionDuration?: number
     ) => {
-      const animDef = getAnimationById(animationId);
+      const animDef = getAnimationById(animationRegistry, animationId);
 
       let clip = await loadAnimation(animationId);
 
-      if (!clip && animationId !== 'standingIdle') {
-        console.warn(`⚠️ Animation "${animationId}" failed to load, falling back to standingIdle`);
-        clip = await loadAnimation('standingIdle');
+      if (!clip && animationId !== 'idle') {
+        console.warn(`⚠️ Animation "${animationId}" failed to load, falling back to idle`);
+        clip = await loadAnimation('idle');
       }
 
       if (clip) {
@@ -210,6 +212,13 @@ const VRMModel = forwardRef<VRMModelRef, VRMModelProps>(
     }, [vrm, kiss, lipsClosed, jaw]);
 
     useVrmBlink(vrm);
+
+    useVrmLipsync({
+      vrm,
+      audioVolume,
+      isAudioPlaying,
+      setCurrentExpression,
+    });
 
     useVrmLookAt(vrm, {
       enabled: true,

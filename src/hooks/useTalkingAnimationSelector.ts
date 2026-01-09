@@ -5,7 +5,7 @@ import { getRandomTalkingAnimation } from '../constants/animation-registry';
  * Hook để select talking animation random từ pool
  * Tương tự như useIdleAnimationSelector nhưng cho talking animations
  */
-export const useTalkingAnimationSelector = () => {
+export const useTalkingAnimationSelector = (registry: Record<string, any>) => {
   const currentTalkingRef = useRef<string | null>(null);
   const previousTalkingRef = useRef<string | null>(null);
 
@@ -13,7 +13,7 @@ export const useTalkingAnimationSelector = () => {
    * Get next talking animation (random, excluding current và previous)
    */
   const getNextTalkingAnimation = useCallback((): string | null => {
-    const randomTalking = getRandomTalkingAnimation(currentTalkingRef.current || undefined);
+    const randomTalking = getRandomTalkingAnimation(registry, currentTalkingRef.current || undefined);
     if (!randomTalking) return null;
 
     previousTalkingRef.current = currentTalkingRef.current;
@@ -34,7 +34,7 @@ export const useTalkingAnimationSelector = () => {
    * Get initial random talking animation
    */
   const getInitialTalking = useCallback((): string | null => {
-    const randomTalking = getRandomTalkingAnimation();
+    const randomTalking = getRandomTalkingAnimation(registry);
     if (randomTalking) {
       currentTalkingRef.current = randomTalking.id;
       return randomTalking.id;

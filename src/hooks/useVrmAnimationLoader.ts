@@ -71,7 +71,10 @@ const trimAnimationClip = (
  * Loads animations on-demand and caches them for reuse
  * Automatically preloads critical animations defined in registry
  */
-export const useVrmAnimationLoader = (vrm: VRM | null): UseVrmAnimationLoaderReturn => {
+export const useVrmAnimationLoader = (
+  vrm: VRM | null,
+  registry: Record<string, any>
+): UseVrmAnimationLoaderReturn => {
   const cacheRef = useRef<AnimationCache>({});
   const [loadingStates, setLoadingStates] = useState<LoadingState>({});
   const [preloadedAnimations, setPreloadedAnimations] = useState<string[]>([]);
@@ -102,7 +105,7 @@ export const useVrmAnimationLoader = (vrm: VRM | null): UseVrmAnimationLoaderRet
         });
       }
 
-      const animDef = getAnimationById(animationId);
+      const animDef = getAnimationById(registry, animationId);
       if (!animDef) {
         console.warn(`Animation ${animationId} not found in registry`);
         return null;
@@ -136,7 +139,9 @@ export const useVrmAnimationLoader = (vrm: VRM | null): UseVrmAnimationLoaderRet
           clip = trimAnimationClip(clip, animDef.startFrame, animDef.endFrame);
         } else if (animDef.type === 'vrma') {
           const gltfLoader = new GLTFLoader();
+          // @ts-ignore
           gltfLoader.register((parser) => new VRMLoaderPlugin(parser));
+          // @ts-ignore
           gltfLoader.register((parser) => new VRMAnimationLoaderPlugin(parser));
 
           const gltf = await new Promise<any>((resolve, reject) => {
@@ -151,6 +156,7 @@ export const useVrmAnimationLoader = (vrm: VRM | null): UseVrmAnimationLoaderRet
           if (gltf.animations && gltf.animations[0]) {
             const rawClip = gltf.animations[0].clone();
             rawClip.name = animationId;
+            // @ts-ignore
             clip = cleanAnimationTracks(rawClip, vrm.scene);
             if (!clip) {
               throw new Error(`Failed to load animation ${animationId}: clip is null`);
@@ -194,8 +200,8 @@ export const useVrmAnimationLoader = (vrm: VRM | null): UseVrmAnimationLoaderRet
   useEffect(() => {
     if (!vrm) return;
 
-    const preloadAnims = getPreloadAnimations();
-    const loadPromises = preloadAnims.map((anim) =>
+    const preloadList = getPreloadAnimations(registry);
+    const loadPromises = preloadList.map((anim) =>
       loadAnimation(anim.id).then((clip) => ({
         id: anim.id,
         clip,
@@ -207,9 +213,9 @@ export const useVrmAnimationLoader = (vrm: VRM | null): UseVrmAnimationLoaderRet
       const successfulLoads = results.filter((r) => r.success).map((r) => r.id);
       setPreloadedAnimations(successfulLoads);
 
-      const standingIdleResult = results.find((r) => r.id === 'standingIdle');
-      if (!standingIdleResult || !standingIdleResult.success) {
-        const errorMsg = '❌ CRITICAL: standingIdle animation failed to load!';
+      const idleResult = results.find((r) => r.id === 'idle');
+      if (!idleResult || !idleResult.success) {
+        const errorMsg = '❌ CRITICAL: idle animation failed to load!';
         console.error(errorMsg);
         setPreloadError(errorMsg);
         setIsCriticalAnimationReady(false);

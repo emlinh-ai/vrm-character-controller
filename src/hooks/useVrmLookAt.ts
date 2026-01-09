@@ -30,11 +30,13 @@ export function useVrmLookAt(vrm: VRM | null, options: UseVrmLookAtOptions = {})
 
     if (vrm.lookAt) {
       const cameraPosition = new THREE.Vector3();
+      // @ts-ignore
       camera.getWorldPosition(cameraPosition);
 
       targetPositionRef.current.lerp(cameraPosition, smoothness);
-
+      // @ts-ignore
       vrm.lookAt.lookAt(targetPositionRef.current);
+      // @ts-ignore
       vrm.lookAt.update(delta);
     }
   });
