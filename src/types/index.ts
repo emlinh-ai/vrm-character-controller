@@ -76,6 +76,11 @@ export interface VRMViewerProps {
   rotation?: [number, number, number];
   scale?: number;
   lightIntensity?: number;
+  backgroundImageUrl?: string;
+  backgroundPosition?: [number, number, number];
+  backgroundShadowOpacity?: number;
+  backgroundSize?: [number, number];
+  backgroundLightPosition?: [number, number, number];
   // Animation transition settings
   transitionDuration?: number;
   idleTransitionDuration?: number;

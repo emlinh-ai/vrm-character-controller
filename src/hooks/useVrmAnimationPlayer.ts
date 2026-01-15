@@ -12,6 +12,14 @@ interface ActiveAction {
   clip: THREE.AnimationClip;
 }
 
+interface SeamlessLoopState {
+  clip: THREE.AnimationClip;
+  actions: [THREE.AnimationAction, THREE.AnimationAction];
+  activeIndex: 0 | 1;
+  fadeDuration: number;
+  isFading: boolean;
+}
+
 const MIXAMO_INITIAL_FRAME_OFFSET_SECONDS: number = 1 / 30;
 const LOWER_BODY_MAX_WEIGHT = 0.3;
 
@@ -40,6 +48,11 @@ export const useVrmAnimationPlayer = ({
   const actionsCache = useRef<Map<string, THREE.AnimationAction>>(new Map());
   const finishedListenerRef = useRef<((e: any) => void) | null>(null);
   const hasTriggeredLoopPreventionRef = useRef<boolean>(false);
+  const seamlessLoopsRef = useRef<Record<Channel, SeamlessLoopState | null>>({
+    full: null,
+    upper: null,
+    lower: null,
+  });
 
   useEffect(() => {
     if (!vrm?.scene) return;
@@ -50,6 +63,9 @@ export const useVrmAnimationPlayer = ({
 
     mixerRef.current = new THREE.AnimationMixer(vrm.scene as any);
     actionsCache.current.clear();
+    seamlessLoopsRef.current.full = null;
+    seamlessLoopsRef.current.upper = null;
+    seamlessLoopsRef.current.lower = null;
 
     if (currentClip && wasPlaying) {
       const action = mixerRef.current.clipAction(currentClip);
@@ -79,6 +95,87 @@ export const useVrmAnimationPlayer = ({
     actionsCache.current.set(clip.name, action);
     return action;
   }, []);
+
+  const isClipSeamless = useCallback((clip: THREE.AnimationClip): boolean => {
+    return Boolean((clip as any)?.userData?.isSeamless);
+  }, []);
+
+  const stopSeamlessLoop = useCallback(
+    (channel: Channel) => {
+      const state = seamlessLoopsRef.current[channel];
+      if (!state) return;
+      state.actions.forEach((action) => {
+        action.stop();
+        action.enabled = false;
+      });
+      seamlessLoopsRef.current[channel] = null;
+    },
+    []
+  );
+
+  const setupSeamlessLoop = useCallback(
+    (
+      channel: Channel,
+      clip: THREE.AnimationClip,
+      fadeDuration: number,
+      shouldReset: boolean
+    ) => {
+      if (!mixerRef.current) return;
+
+      const existing = seamlessLoopsRef.current[channel];
+      if (existing && existing.clip.name === clip.name) {
+        if (shouldReset) {
+          existing.actions.forEach((action) => {
+            action.reset();
+            action.enabled = true;
+            action.setEffectiveTimeScale(animationSpeed);
+            action.setEffectiveWeight(1);
+          });
+          existing.actions[existing.activeIndex].play();
+        }
+        activeActionsRef.current[channel] = {
+          action: existing.actions[existing.activeIndex],
+          clip,
+        };
+        return;
+      }
+
+      stopSeamlessLoop(channel);
+
+      const clipA = clip.clone();
+      clipA.name = `${clip.name}__seamless__A`;
+      const clipB = clip.clone();
+      clipB.name = `${clip.name}__seamless__B`;
+
+      const actionA = mixerRef.current.clipAction(clipA);
+      const actionB = mixerRef.current.clipAction(clipB);
+
+      [actionA, actionB].forEach((action) => {
+        action.reset();
+        action.setLoop(THREE.LoopOnce, 1);
+        action.clampWhenFinished = true;
+        action.enabled = true;
+        action.setEffectiveTimeScale(animationSpeed);
+        action.setEffectiveWeight(1);
+      });
+
+      actionA.play();
+
+      actionsCache.current.set(clipA.name, actionA);
+      actionsCache.current.set(clipB.name, actionB);
+
+      seamlessLoopsRef.current[channel] = {
+        clip,
+        actions: [actionA, actionB],
+        activeIndex: 0,
+        fadeDuration,
+        isFading: false,
+      };
+
+      activeActionsRef.current[channel] = { action: actionA, clip };
+    },
+    [animationSpeed, stopSeamlessLoop]
+  );
 
   const getEffectiveDuration = useCallback((clip: THREE.AnimationClip): number => {
     const meta = (clip as any).userData || {};
@@ -110,6 +207,12 @@ export const useVrmAnimationPlayer = ({
     Object.values(activeActionsRef.current).forEach((act) => {
       if (act) act.action.setEffectiveTimeScale(animationSpeed);
     });
+    Object.values(seamlessLoopsRef.current).forEach((state) => {
+      if (!state) return;
+      state.actions.forEach((action) => {
+        action.setEffectiveTimeScale(animationSpeed);
+      });
+    });
   }, [animationSpeed]);
 
   const resolveChannel = (clip: THREE.AnimationClip, override?: Channel | 'full'): Channel => {
@@ -138,6 +241,9 @@ export const useVrmAnimationPlayer = ({
       const newAction = getOrCreateAction(clip);
       if (!newAction) return;
 
+      const shouldUseSeamlessLoop = shouldLoop && isClipSeamless(clip);
+      const effectiveFadeDuration = Math.max(0.05, customTransitionDuration ?? transitionDuration);
+
       const activeChannelAction = activeActionsRef.current[channel];
       const isSameClip = activeChannelAction && activeChannelAction.clip.name === clip.name;
       const canSyncLoopTime = shouldLoop && activeChannelAction != null;
@@ -163,6 +269,25 @@ export const useVrmAnimationPlayer = ({
       if (!synced) {
         newAction.time = 0;
       }
+
+      if (shouldUseSeamlessLoop) {
+        // Nếu channel full, dừng các channel khác ngay lập tức
+        if (channel === 'full') {
+          fadeOutOtherChannels('full');
+        }
+
+        if (activeChannelAction && !isSameClip) {
+          activeChannelAction.action.stop();
+        }
+
+        setupSeamlessLoop(channel, clip, effectiveFadeDuration, true);
+        playingRef.current = true;
+        hasCompletedRef.current = false;
+        hasTriggeredLoopPreventionRef.current = false;
+        return;
+      }
+
+      stopSeamlessLoop(channel);
 
       newAction.setLoop(shouldLoop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
       newAction.clampWhenFinished = !shouldLoop;
@@ -221,13 +346,28 @@ export const useVrmAnimationPlayer = ({
       hasCompletedRef.current = false;
       hasTriggeredLoopPreventionRef.current = false;
     },
-    [vrm, transitionDuration, animationSpeed, getOrCreateAction, onAnimationComplete]
+    [
+      vrm,
+      transitionDuration,
+      animationSpeed,
+      getOrCreateAction,
+      onAnimationComplete,
+      isClipSeamless,
+      setupSeamlessLoop,
+      stopSeamlessLoop,
+    ]
   );
 
   const pause = useCallback(() => {
     playingRef.current = false;
     Object.values(activeActionsRef.current).forEach((act) => {
       if (act) act.action.paused = true;
+    });
+    Object.values(seamlessLoopsRef.current).forEach((state) => {
+      if (!state) return;
+      state.actions.forEach((action) => {
+        action.paused = true;
+      });
     });
   }, []);
 
@@ -236,12 +376,24 @@ export const useVrmAnimationPlayer = ({
     Object.values(activeActionsRef.current).forEach((act) => {
       if (act) act.action.paused = false;
     });
+    Object.values(seamlessLoopsRef.current).forEach((state) => {
+      if (!state) return;
+      state.actions.forEach((action) => {
+        action.paused = false;
+      });
+    });
   }, []);
 
   const stop = useCallback(() => {
     playingRef.current = false;
     Object.values(activeActionsRef.current).forEach((act) => {
       if (act) act.action.stop();
+    });
+    Object.values(seamlessLoopsRef.current).forEach((state) => {
+      if (!state) return;
+      state.actions.forEach((action) => {
+        action.stop();
+      });
     });
   }, []);
 
@@ -264,6 +416,41 @@ export const useVrmAnimationPlayer = ({
       }
     });
 
+    if (playingRef.current) {
+      (['full', 'upper', 'lower'] as Channel[]).forEach((channel) => {
+        const state = seamlessLoopsRef.current[channel];
+        if (!state) return;
+
+        const activeAction = state.actions[state.activeIndex];
+        const duration = getEffectiveDuration(state.clip);
+        if (duration <= 0) return;
+
+        const fadeDuration = Math.min(state.fadeDuration, Math.max(0.05, duration * 0.5));
+        const timeUntilEnd = duration - activeAction.time;
+
+        if (!state.isFading && timeUntilEnd <= fadeDuration && timeUntilEnd > 0) {
+          const nextIndex: 0 | 1 = state.activeIndex === 0 ? 1 : 0;
+          const nextAction = state.actions[nextIndex];
+
+          nextAction.reset();
+          nextAction.enabled = true;
+          nextAction.setEffectiveTimeScale(animationSpeed);
+          nextAction.setEffectiveWeight(1);
+          nextAction.play();
+
+          activeAction.crossFadeTo(nextAction, fadeDuration, true);
+
+          state.activeIndex = nextIndex;
+          state.isFading = true;
+          activeActionsRef.current[channel] = { action: nextAction, clip: state.clip };
+        }
+
+        if (state.isFading && activeAction.time >= fadeDuration) {
+          state.isFading = false;
+        }
+      });
+    }
+
     // Logic xử lý loop repeat prevention và notification
     if (mixerRef.current && playingRef.current && !hasTriggeredLoopPreventionRef.current && onLoopAboutToRepeat) {
       const primary =
@@ -273,9 +460,11 @@ export const useVrmAnimationPlayer = ({
         const clip = primary.clip;
         const effectiveWeight = action.getEffectiveWeight();
 
-        if (action.loop === THREE.LoopRepeat && effectiveWeight > 0.9) {
+        const isLooping = action.loop === THREE.LoopRepeat || isClipSeamless(clip);
+
+        if (isLooping && effectiveWeight > 0.9) {
           const duration = getEffectiveDuration(clip);
-          const timeUntilEnd = duration - (action.time % duration);
+          const timeUntilEnd = duration - Math.min(action.time, duration);
           // Giảm khả năng chuyển sớm: lấy min(ngưỡng cấu hình, 5% thời lượng), có sàn 0.05s
           const dynamicThreshold = Math.min(loopPreventionThreshold, Math.max(0.05, duration * 0.05));
 

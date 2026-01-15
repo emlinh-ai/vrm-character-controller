@@ -12,6 +12,7 @@ import { useVrmAnimationPlayer } from '../hooks/useVrmAnimationPlayer';
 import { useVrmExpression } from '../hooks/useVrmExpression';
 import { useIdleAnimationSelector } from '../hooks/useIdleAnimationSelector';
 import { useGuitarAttachment } from '../hooks/useGuitarAttachment';
+import { useChairAttachment } from '../hooks/useChairAttachment';
 import { getAnimationById, getAnimationsByCategory } from '../constants/animation-registry';
 import type { VRMModelProps, VRMModelRef } from '../types';
 
@@ -73,6 +74,7 @@ const VRMModel = forwardRef<VRMModelRef, VRMModelProps>(
     const lastLowerIdleRef = useRef<string | null>(null);
 
     const { guitarRef } = useGuitarAttachment({ vrm });
+    useChairAttachment({ vrm });
 
     const defaultClip = useMemo(() => {
       return getLoadedAnimation('idle') || null;
@@ -265,6 +267,16 @@ const VRMModel = forwardRef<VRMModelRef, VRMModelProps>(
         }
       }
     }, [vrm, preloadedAnimations.length, isModelReady, onLoadComplete]);
+
+    useEffect(() => {
+      if (!scene) return;
+      scene.traverse((child) => {
+        const mesh = child as unknown as { isMesh?: boolean; isSkinnedMesh?: boolean; castShadow?: boolean };
+        if (mesh.isMesh || mesh.isSkinnedMesh) {
+          mesh.castShadow = true;
+        }
+      });
+    }, [scene]);
 
     useEffect(() => {
       if (!isModelReady || hasPlayedGreeting) return;

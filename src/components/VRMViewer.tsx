@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useRef, useEffect } from 'react';
+import { useTexture } from '@react-three/drei';
+import { useControls } from 'leva';
 import VRMModel from './VRMModel';
 import type { VRMViewerProps, VRMModelRef } from '../types';
 
@@ -29,6 +31,11 @@ const VRMViewer: React.FC<VRMViewerProps> = ({
   position = [0.55, -1.25, 0],
   rotation = [0, -1.75 / Math.PI, 0],
   scale = 1,
+  backgroundImageUrl = '/assets/images/background-studio.jpg',
+  backgroundPosition = [0, 0.75, -0.9],
+  backgroundSize = [6, 3.5],
+  backgroundShadowOpacity = 0.35,
+  backgroundLightPosition = [9, 10, 6],
   lightIntensity = 1,
   transitionDuration = 0.5,
   idleTransitionDuration = 1.0,
@@ -41,6 +48,13 @@ const VRMViewer: React.FC<VRMViewerProps> = ({
   animationRegistry = {},
 }) => {
   const vrmModelRef = useRef<VRMModelRef>(null);
+  const backgroundTexture = useTexture(backgroundImageUrl);
+  const backgroundControls = useControls('Background', {
+    position: { value: backgroundPosition, step: 0.01 },
+    size: { value: backgroundSize, step: 0.1 },
+    shadowOpacity: { value: backgroundShadowOpacity, min: 0, max: 1, step: 0.01 },
+    lightPosition: { value: backgroundLightPosition, step: 0.1 },
+  });
 
   useEffect(() => {
     if (vrmModelRef.current) {
@@ -61,13 +75,37 @@ const VRMViewer: React.FC<VRMViewerProps> = ({
 
   return (
     <>
-      <ambientLight intensity={lightIntensity * 0.5} />
-      <directionalLight position={[10, 10, 5]} intensity={lightIntensity} />
-      <group 
-        position={position} 
-        rotation={rotation} 
+      <group position={backgroundControls.position as [number, number, number]}>
+        <mesh>
+          <planeGeometry args={backgroundControls.size as [number, number]} />
+          <meshBasicMaterial map={backgroundTexture} toneMapped={false} />
+        </mesh>
+        <mesh position={[0, 0, 0.01]} receiveShadow>
+          <planeGeometry args={backgroundControls.size as [number, number]} />
+          <shadowMaterial transparent opacity={backgroundControls.shadowOpacity as number} />
+        </mesh>
+      </group>
+      <ambientLight intensity={lightIntensity * 0.7} />
+      <directionalLight
+        position={backgroundControls.lightPosition as [number, number, number]}
+        intensity={lightIntensity}
+        castShadow
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
+        shadow-bias={-0.0005}
+        shadow-camera-left={-8}
+        shadow-camera-right={8}
+        shadow-camera-top={8}
+        shadow-camera-bottom={-8}
+        shadow-camera-near={1}
+        shadow-camera-far={30}
+      />
+      <group
+        position={position}
+        rotation={rotation}
         scale={scale}
         onPointerOver={onPointerOver}
+        castShadow
       >
         <VRMModel
           ref={vrmModelRef}
