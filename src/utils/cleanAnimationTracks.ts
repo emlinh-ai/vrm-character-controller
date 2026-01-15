@@ -19,16 +19,21 @@ export function cleanAnimationTracks(
   const invalidTracks: string[] = [];
 
   clip.tracks.forEach((track: THREE.KeyframeTrack) => {
-    const trackName = track.name.startsWith('J_Sec') ? track.name : 'Normalized_' + track.name;
-    const nodeName = trackName.split('.')[0];
+    const candidates = [
+      track.name, // VRMA: giữ nguyên tên gốc
+      track.name.startsWith('J_Sec') ? track.name : 'Normalized_' + track.name, // Fallback cũ
+    ];
 
-    const targetNode = targetScene.getObjectByName(nodeName);
+    const matchedName = candidates.find((name) => {
+      const nodeName = name.split('.')[0];
+      return targetScene.getObjectByName(nodeName);
+    });
 
-    if (targetNode) {
-      track.name = trackName;
+    if (matchedName) {
+      track.name = matchedName;
       validTracks.push(track);
     } else {
-      invalidTracks.push(trackName);
+      invalidTracks.push(candidates[candidates.length - 1]);
     }
   });
 

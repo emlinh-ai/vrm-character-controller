@@ -2,8 +2,9 @@ import type { VRM } from '@pixiv/three-vrm';
 import * as THREE from 'three';
 
 // Animation Types
-export type AnimationType = 'fbx' | 'vrma';
+export type AnimationType = 'fbx' | 'vrma' | 'glb';
 export type AnimationCategory = 'idle' | 'gesture' | 'emotion' | 'talking';
+export type AnimationBodyPart = 'upper' | 'lower' | 'full';
 
 export interface AnimationDefinition {
   readonly id: string;
@@ -14,6 +15,8 @@ export interface AnimationDefinition {
   readonly category?: AnimationCategory;
   readonly startFrame?: number;
   readonly endFrame?: number;
+  readonly totalFrames?: number;
+  readonly bodyPart?: AnimationBodyPart;
 }
 
 // VRM Model Props
@@ -24,6 +27,7 @@ export interface VRMModelProps {
   audioCurrentTime?: number;
   audioDuration?: number;
   isAudioPlaying?: boolean;
+  eyeClosure?: number;
   positions?: [number, number, number];
   emotion?: string | null;
   onLoadComplete?: () => void;
@@ -56,10 +60,14 @@ export interface VRMViewerProps {
   audioVolume?: number;
   audioCurrentTime?: number;
   audioDuration?: number;
+  eyeClosure?: number;
+  visemeId?: string;
   emotion?: string | null;
+  emotionStrength?: number;
   activeAnimationId?: string | null;
   activeAnimationToken?: number;
   onReadyToTalk?: () => void;
+  onLoadComplete?: () => void;
   kiss?: number;
   lipsClosed?: number;
   jaw?: number;
@@ -68,12 +76,22 @@ export interface VRMViewerProps {
   rotation?: [number, number, number];
   scale?: number;
   lightIntensity?: number;
+  // Animation transition settings
+  transitionDuration?: number;
+  idleTransitionDuration?: number;
+  animationSpeed?: number;
   // Click-through support for desktop apps
+  onAnimationEnd?: () => void;
+  onLoopAboutToRepeat?: () => void;
   onPointerOver?: () => void;
   onPointerOut?: () => void;
   onPointerDown?: (event: any) => void;
   onPointerUp?: (event: any) => void;
   animationRegistry?: Record<string, any>;
+}
+
+export interface VRMModelProps extends VRMViewerProps {
+  isAudioPlaying?: boolean;
 }
 
 // Animation Loader Types
@@ -103,12 +121,18 @@ export interface UseVrmAnimationPlayerParams {
   loop?: boolean;
   onAnimationComplete?: () => void;
   transitionDuration?: number;
+  animationSpeed?: number;
   onLoopAboutToRepeat?: () => void;
   loopPreventionThreshold?: number;
 }
 
 export interface UseVrmAnimationPlayerReturn {
-  playAnimation: (clip: THREE.AnimationClip | null, shouldLoop?: boolean, customTransitionDuration?: number) => void;
+  playAnimation: (
+    clip: THREE.AnimationClip | null,
+    shouldLoop?: boolean,
+    customTransitionDuration?: number,
+    bodyPartOverride?: AnimationBodyPart | 'full'
+  ) => void;
   pause: () => void;
   resume: () => void;
   stop: () => void;
@@ -120,6 +144,7 @@ export interface UseVrmAnimationPlayerReturn {
 export interface UseVrmExpressionParams {
   vrm: VRM | null;
   emotion: string | null;
+  emotionStrength?: number;
 }
 
 export interface UseVrmExpressionReturn {
@@ -138,6 +163,8 @@ export interface UseVrmLipsyncParams {
   audioVolume?: number;
   isAudioPlaying?: boolean;
   setCurrentExpression?: (expr: string) => void;
+  eyeClosure?: number;
+  visemeId?: string | null;
 }
 
 export interface StreamingLipsyncOptions {

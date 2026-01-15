@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin } from '@pixiv/three-vrm';
-import { VRMAnimationLoaderPlugin } from '@pixiv/three-vrm-animation';
+import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 import * as THREE from 'three';
 import type { VRM } from '@pixiv/three-vrm';
 import { remapMixamoAnimationToVrm } from '../utils/remapMixamoAnimationToVrm';
@@ -131,9 +131,31 @@ export const useVrmAnimationLoader = (
               (error) => reject(error)
             );
           });
-          clip = remapMixamoAnimationToVrm(vrm, fbx);
+          clip = remapMixamoAnimationToVrm(vrm, fbx, animDef.bodyPart);
           if (!clip) {
             throw new Error(`Failed to load animation ${animationId}: clip is null`);
+          }
+          clip.name = animationId;
+          clip = trimAnimationClip(clip, animDef.startFrame, animDef.endFrame);
+        } else if (animDef.type === 'glb') {
+          const gltfLoader = new GLTFLoader();
+          const gltf = await new Promise<any>((resolve, reject) => {
+            gltfLoader.load(
+              animDef.path,
+              (data) => resolve(data),
+              undefined,
+              (error) => reject(error)
+            );
+          });
+          // Mixamo GLB thường chứa animation trong gltf.animations
+          // Chúng ta cần remap nó tương tự như FBX
+          clip = remapMixamoAnimationToVrm(vrm, {
+            animations: gltf.animations,
+            getObjectByName: (name: string) => gltf.scene.getObjectByName(name)
+          } as any, animDef.bodyPart);
+
+          if (!clip) {
+            throw new Error(`Failed to load GLB animation ${animationId}: clip is null`);
           }
           clip.name = animationId;
           clip = trimAnimationClip(clip, animDef.startFrame, animDef.endFrame);
@@ -153,16 +175,39 @@ export const useVrmAnimationLoader = (
             );
           });
 
-          if (gltf.animations && gltf.animations[0]) {
+          // Ưu tiên đọc VRMAnimation (VRMA) và bind vào humanoid của VRM
+          const vrmAnimations = gltf?.userData?.vrmAnimations;
+          if (vrmAnimations && vrmAnimations.length > 0) {
+            const vrmAnimation = vrmAnimations[0];
+            const boundClip = createVRMAnimationClip(vrmAnimation as any, vrm as any) as unknown as THREE.AnimationClip;
+            boundClip.name = animationId;
+            clip = trimAnimationClip(boundClip, animDef.startFrame, animDef.endFrame);
+          } else if (gltf.animations && gltf.animations[0]) {
+            // Fallback: một số file vẫn có gltf.animations
             const rawClip = gltf.animations[0].clone();
             rawClip.name = animationId;
-            // @ts-ignore
-            clip = cleanAnimationTracks(rawClip, vrm.scene);
-            if (!clip) {
-              throw new Error(`Failed to load animation ${animationId}: clip is null`);
-            }
-            clip = trimAnimationClip(clip, animDef.startFrame, animDef.endFrame);
+            clip = trimAnimationClip(rawClip, animDef.startFrame, animDef.endFrame);
+          } else {
+            throw new Error(`Failed to load VRMA animation ${animationId}: no animation data`);
           }
+        }
+
+        // Đính metadata khung hình nếu có (totalFrames/start/end) để tính thời lượng hiệu dụng
+        if (clip) {
+          const userData = (clip as any).userData || {};
+          if (animDef.totalFrames) {
+            userData.totalFrames = animDef.totalFrames;
+          }
+          if (animDef.startFrame !== undefined) {
+            userData.startFrame = animDef.startFrame;
+          }
+          if (animDef.endFrame !== undefined) {
+            userData.endFrame = animDef.endFrame;
+          }
+          if (animDef.bodyPart) {
+            userData.bodyPart = animDef.bodyPart;
+          }
+          (clip as any).userData = userData;
         }
 
         cacheRef.current[animationId] = clip;
@@ -209,30 +254,35 @@ export const useVrmAnimationLoader = (
       }))
     );
 
-    Promise.all(loadPromises).then((results) => {
-      const successfulLoads = results.filter((r) => r.success).map((r) => r.id);
-      setPreloadedAnimations(successfulLoads);
+    Promise.all(loadPromises)
+      .then((results) => {
+        const successfulLoads = results.filter((r) => r.success).map((r) => r.id);
+        setPreloadedAnimations(successfulLoads);
 
-      const idleResult = results.find((r) => r.id === 'idle');
-      if (!idleResult || !idleResult.success) {
-        const errorMsg = '❌ CRITICAL: idle animation failed to load!';
-        console.error(errorMsg);
+        // Chấp nhận bất kỳ idle nào preload thành công làm critical (idleDown/idleUp)
+        const anyIdleSuccess = results.some(
+          (r) => registry[r.id]?.category === 'idle' && r.success
+        );
+        if (!anyIdleSuccess) {
+          const errorMsg = '❌ CRITICAL: no idle animation preloaded successfully!';
+          console.error(errorMsg);
+          setPreloadError(errorMsg);
+          setIsCriticalAnimationReady(false);
+        } else {
+          setIsCriticalAnimationReady(true);
+        }
+
+        const failedLoads = results.filter((r) => !r.success);
+        if (failedLoads.length > 0) {
+          console.warn('⚠️ Failed to preload animations:', failedLoads.map((r) => r.id));
+        }
+      })
+      .catch((error) => {
+        const errorMsg = `❌ CRITICAL: Preload failed - ${error.message}`;
+        console.error(errorMsg, error);
         setPreloadError(errorMsg);
         setIsCriticalAnimationReady(false);
-      } else {
-        setIsCriticalAnimationReady(true);
-      }
-
-      const failedLoads = results.filter((r) => !r.success);
-      if (failedLoads.length > 0) {
-        console.warn('⚠️ Failed to preload animations:', failedLoads.map((r) => r.id));
-      }
-    }).catch((error) => {
-      const errorMsg = `❌ CRITICAL: Preload failed - ${error.message}`;
-      console.error(errorMsg, error);
-      setPreloadError(errorMsg);
-      setIsCriticalAnimationReady(false);
-    });
+      });
   }, [vrm, loadAnimation]);
 
   return {

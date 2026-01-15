@@ -2,13 +2,84 @@
 import * as THREE from 'three';
 import type { VRM } from '@pixiv/three-vrm';
 import { mixamoVRMRigMap } from './mixamoVRMRigMap';
+import type { AnimationBodyPart } from '../types';
 
 interface MixamoAsset extends THREE.Group {
   animations: THREE.AnimationClip[];
   getObjectByName(name: string): THREE.Object3D | undefined;
 }
 
-export function remapMixamoAnimationToVrm(vrm: VRM, asset: MixamoAsset): THREE.AnimationClip | null {
+const lowerBodyBones = new Set([
+  'hips',
+  'leftUpperLeg',
+  'leftLowerLeg',
+  'leftFoot',
+  'leftToes',
+  'rightUpperLeg',
+  'rightLowerLeg',
+  'rightFoot',
+  'rightToes',
+]);
+
+const upperBodyBones = new Set([
+  'spine',
+  'chest',
+  'upperChest',
+  'neck',
+  'head',
+  'leftShoulder',
+  'leftUpperArm',
+  'leftLowerArm',
+  'leftHand',
+  'rightShoulder',
+  'rightUpperArm',
+  'rightLowerArm',
+  'rightHand',
+  'leftThumbMetacarpal',
+  'leftThumbProximal',
+  'leftThumbDistal',
+  'leftIndexProximal',
+  'leftIndexIntermediate',
+  'leftIndexDistal',
+  'leftMiddleProximal',
+  'leftMiddleIntermediate',
+  'leftMiddleDistal',
+  'leftRingProximal',
+  'leftRingIntermediate',
+  'leftRingDistal',
+  'leftLittleProximal',
+  'leftLittleIntermediate',
+  'leftLittleDistal',
+  'rightThumbMetacarpal',
+  'rightThumbProximal',
+  'rightThumbDistal',
+  'rightIndexProximal',
+  'rightIndexIntermediate',
+  'rightIndexDistal',
+  'rightMiddleProximal',
+  'rightMiddleIntermediate',
+  'rightMiddleDistal',
+  'rightRingProximal',
+  'rightRingIntermediate',
+  'rightRingDistal',
+  'rightLittleProximal',
+  'rightLittleIntermediate',
+  'rightLittleDistal',
+]);
+
+const isBoneAllowedForBodyPart = (vrmBoneName: string, bodyPart?: AnimationBodyPart): boolean => {
+  if (!bodyPart || bodyPart === 'full') return true;
+  if (bodyPart === 'lower') {
+    return lowerBodyBones.has(vrmBoneName);
+  }
+  return upperBodyBones.has(vrmBoneName);
+};
+
+export function remapMixamoAnimationToVrm(
+  vrm: VRM,
+  asset: MixamoAsset,
+  bodyPart?: AnimationBodyPart
+): THREE.AnimationClip | null {
   let foundClip = THREE.AnimationClip.findByName(asset.animations, 'mixamo.com');
   if (!foundClip) {
     foundClip = asset.animations[0];
@@ -56,6 +127,12 @@ export function remapMixamoAnimationToVrm(vrm: VRM, asset: MixamoAsset): THREE.A
 
       const propertyName = trackSplitted[1];
 
+      // Bỏ các track không thuộc bodyPart yêu cầu
+      if (!isBoneAllowedForBodyPart(vrmBoneName, bodyPart)) {
+        skippedTracks.push(`${vrmNodeName}.${propertyName} (filtered by bodyPart ${bodyPart})`);
+        return;
+      }
+
       mixamoRigNode.getWorldQuaternion(restRotationInverse).invert();
       mixamoRigNode.parent?.getWorldQuaternion(parentRestWorldRotation);
 
@@ -82,17 +159,22 @@ export function remapMixamoAnimationToVrm(vrm: VRM, asset: MixamoAsset): THREE.A
           )
         );
       } else if (track instanceof THREE.VectorKeyframeTrack) {
-        const value = Array.from(track.values).map(
-          (v: number, i: number) =>
-            (vrm.meta?.metaVersion === '0' && i % 3 !== 1 ? -v : v) * hipsPositionScale
-        );
-        tracks.push(
-          new THREE.VectorKeyframeTrack(
-            `${vrmNodeName}.${propertyName}`,
-            track.times as unknown as number[],
-            value
-          )
-        );
+        // Giữ nguyên root motion cho xương hông (hips)
+        if (vrmBoneName === 'hips') {
+          const value = Array.from(track.values).map((v: number, i: number) => {
+            // i % 3: 0 = x, 1 = y, 2 = z
+            const axis = i % 3;
+            return (vrm.meta?.metaVersion === '0' && axis !== 1 ? -v : v) * hipsPositionScale;
+          });
+
+          tracks.push(
+            new THREE.VectorKeyframeTrack(
+              `${vrmNodeName}.${propertyName}`,
+              track.times as unknown as number[],
+              value
+            )
+          );
+        }
       }
     } else {
       skippedTracks.push(`${mixamoRigName}.${trackSplitted[1]} (no VRM bone mapping)`);

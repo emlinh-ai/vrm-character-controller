@@ -5,12 +5,15 @@ import * as THREE from 'three';
 import type { VRM } from '@pixiv/three-vrm';
 import type { UseVrmAnimationPlayerParams, UseVrmAnimationPlayerReturn } from '../types';
 
+type Channel = 'full' | 'upper' | 'lower';
+
 interface ActiveAction {
   action: THREE.AnimationAction;
   clip: THREE.AnimationClip;
 }
 
 const MIXAMO_INITIAL_FRAME_OFFSET_SECONDS: number = 1 / 30;
+const LOWER_BODY_MAX_WEIGHT = 0.3;
 
 /**
  * Custom hook to handle VRM animation playback using AnimationMixer
@@ -22,11 +25,16 @@ export const useVrmAnimationPlayer = ({
   loop = true,
   onAnimationComplete,
   transitionDuration = 0.3,
+  animationSpeed = 1.0,
   onLoopAboutToRepeat,
   loopPreventionThreshold = 0.5,
 }: UseVrmAnimationPlayerParams): UseVrmAnimationPlayerReturn => {
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
-  const activeActionRef = useRef<ActiveAction | null>(null);
+  const activeActionsRef = useRef<Record<Channel, ActiveAction | null>>({
+    full: null,
+    upper: null,
+    lower: null,
+  });
   const playingRef = useRef<boolean>(true);
   const hasCompletedRef = useRef<boolean>(false);
   const actionsCache = useRef<Map<string, THREE.AnimationAction>>(new Map());
@@ -36,9 +44,9 @@ export const useVrmAnimationPlayer = ({
   useEffect(() => {
     if (!vrm?.scene) return;
 
-    const currentClip = activeActionRef.current?.clip;
+    const currentClip = activeActionsRef.current.full?.clip;
     const wasPlaying = playingRef.current;
-    const currentTime = activeActionRef.current?.action?.time || 0;
+    const currentTime = activeActionsRef.current.full?.action?.time || 0;
 
     mixerRef.current = new THREE.AnimationMixer(vrm.scene as any);
     actionsCache.current.clear();
@@ -49,7 +57,7 @@ export const useVrmAnimationPlayer = ({
       action.time = currentTime;
       action.setLoop(THREE.LoopRepeat, Infinity);
       action.play();
-      activeActionRef.current = { action, clip: currentClip };
+      activeActionsRef.current.full = { action, clip: currentClip };
       actionsCache.current.set(currentClip.name, action);
     }
 
@@ -72,101 +80,169 @@ export const useVrmAnimationPlayer = ({
     return action;
   }, []);
 
+  const getEffectiveDuration = useCallback((clip: THREE.AnimationClip): number => {
+    const meta = (clip as any).userData || {};
+    const fps = 30; // giả định mixamo 30fps
+    if (meta.totalFrames) {
+      return meta.totalFrames / fps;
+    }
+    if (meta.startFrame !== undefined && meta.endFrame !== undefined && meta.endFrame > meta.startFrame) {
+      return (meta.endFrame - meta.startFrame) / fps;
+    }
+    return clip.duration;
+  }, []);
+
   useEffect(() => {
-    if (defaultClip && vrm && mixerRef.current && !activeActionRef.current) {
+    if (defaultClip && vrm && mixerRef.current && !activeActionsRef.current.full) {
       const action = getOrCreateAction(defaultClip);
       if (action) {
         action.reset();
         action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+        action.setEffectiveTimeScale(animationSpeed);
         action.play();
-        activeActionRef.current = { action, clip: defaultClip };
+        activeActionsRef.current.full = { action, clip: defaultClip };
       }
     }
-  }, [defaultClip, vrm, loop, getOrCreateAction]);
+  }, [defaultClip, vrm, loop, getOrCreateAction, animationSpeed]);
 
-  const playAnimation = useCallback((clip: THREE.AnimationClip | null, shouldLoop: boolean = true, customTransitionDuration?: number) => {
-    if (!clip || !vrm || !mixerRef.current) return;
+  // Update animation speed for currently playing action
+  useEffect(() => {
+    Object.values(activeActionsRef.current).forEach((act) => {
+      if (act) act.action.setEffectiveTimeScale(animationSpeed);
+    });
+  }, [animationSpeed]);
 
-    const effectiveTransition = customTransitionDuration !== undefined ? customTransitionDuration : transitionDuration;
-    const newAction = getOrCreateAction(clip);
-    if (!newAction) return;
+  const resolveChannel = (clip: THREE.AnimationClip, override?: Channel | 'full'): Channel => {
+    const meta = (clip as any).userData || {};
+    if (override === 'upper' || override === 'lower') return override;
+    if (meta.bodyPart === 'upper') return 'upper';
+    if (meta.bodyPart === 'lower') return 'lower';
+    return 'full';
+  };
 
-    const isSameClip = activeActionRef.current && activeActionRef.current.clip.name === clip.name;
-
-    if (!isSameClip || !shouldLoop) {
-      newAction.reset();
-      if (clip.duration > MIXAMO_INITIAL_FRAME_OFFSET_SECONDS) {
-        newAction.time = MIXAMO_INITIAL_FRAME_OFFSET_SECONDS;
+  const fadeOutOtherChannels = (channel: Channel) => {
+    Object.entries(activeActionsRef.current).forEach(([key, act]) => {
+      if (key !== channel && act) {
+        act.action.stop();
+        act.action.enabled = false;
+        activeActionsRef.current[key as Channel] = null;
       }
-    }
+    });
+  };
 
-    newAction.setLoop(shouldLoop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
-    newAction.clampWhenFinished = !shouldLoop;
-    newAction.enabled = true;
-    newAction.setEffectiveTimeScale(1);
-    newAction.setEffectiveWeight(1);
+  const playAnimation = useCallback(
+    (clip: THREE.AnimationClip | null, shouldLoop: boolean = true, customTransitionDuration?: number, bodyPartOverride?: Channel | 'full') => {
+      if (!clip || !vrm || !mixerRef.current) return;
 
-    if (finishedListenerRef.current && mixerRef.current) {
-      mixerRef.current.removeEventListener('finished', finishedListenerRef.current);
-      finishedListenerRef.current = null;
-    }
+      const channel = resolveChannel(clip, bodyPartOverride);
+      const newAction = getOrCreateAction(clip);
+      if (!newAction) return;
 
-    if (!shouldLoop && mixerRef.current) {
-      const onFinished = (event: any) => {
-        if (event.action === newAction && !hasCompletedRef.current) {
-          hasCompletedRef.current = true;
-          if (onAnimationComplete) {
-            onAnimationComplete();
-          }
+      const activeChannelAction = activeActionsRef.current[channel];
+      const isSameClip = activeChannelAction && activeChannelAction.clip.name === clip.name;
+      const canSyncLoopTime = shouldLoop && activeChannelAction != null;
+      let synced = false;
+
+      if (!isSameClip || !shouldLoop) {
+        newAction.reset();
+      }
+
+      if (canSyncLoopTime) {
+        const oldAction = activeChannelAction!.action;
+        const oldClip = activeChannelAction!.clip;
+        const oldDuration = getEffectiveDuration(oldClip);
+        const newDuration = getEffectiveDuration(clip);
+        if (oldDuration > 0 && newDuration > 0) {
+          const normalized = (oldAction.time % oldDuration) / oldDuration;
+          newAction.time = normalized * newDuration;
+          synced = true;
         }
-      };
-      finishedListenerRef.current = onFinished;
-      mixerRef.current.addEventListener('finished', onFinished);
-    }
-
-    if (activeActionRef.current && !isSameClip) {
-      const oldAction = activeActionRef.current.action;
-
-      // Ensure new action is ready
-      newAction.enabled = true;
-      newAction.setEffectiveTimeScale(1);
-      newAction.setEffectiveWeight(1);
-      newAction.play();
-
-      // Crossfade from old to new
-      oldAction.crossFadeTo(newAction, effectiveTransition, true);
-    } else {
-      newAction.play();
-      if (!isSameClip) {
-        newAction.fadeIn(effectiveTransition);
       }
-    }
 
-    activeActionRef.current = { action: newAction, clip };
-    playingRef.current = true;
-    hasCompletedRef.current = false;
-    hasTriggeredLoopPreventionRef.current = false;
-  }, [vrm, transitionDuration, getOrCreateAction, onAnimationComplete]);
+      // Các clip đã thống nhất pose frame đầu, không cần dịch offset để tránh sốc mesh
+      if (!synced) {
+        newAction.time = 0;
+      }
+
+      newAction.setLoop(shouldLoop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+      newAction.clampWhenFinished = !shouldLoop;
+      newAction.enabled = true;
+      newAction.setEffectiveTimeScale(animationSpeed);
+      newAction.setEffectiveWeight(1);
+
+      if (finishedListenerRef.current && mixerRef.current) {
+        mixerRef.current.removeEventListener('finished', finishedListenerRef.current);
+        finishedListenerRef.current = null;
+      }
+
+      if (!shouldLoop && mixerRef.current) {
+        const onFinished = (event: any) => {
+          if (event.action === newAction && !hasCompletedRef.current) {
+            hasCompletedRef.current = true;
+            if (onAnimationComplete) {
+              onAnimationComplete();
+            }
+          }
+        };
+        finishedListenerRef.current = onFinished;
+        mixerRef.current.addEventListener('finished', onFinished);
+      }
+
+      // Nếu channel full, dừng các channel khác ngay lập tức
+      if (channel === 'full') {
+        fadeOutOtherChannels('full');
+      }
+
+      if (activeChannelAction && !isSameClip) {
+        const oldAction = activeChannelAction.action;
+        oldAction.stop();
+
+        // Reset spring bones để tránh giật mesh khi đổi clip
+        if (vrm.springBoneManager) {
+          vrm.springBoneManager.reset();
+        }
+
+        newAction.enabled = true;
+        newAction.setEffectiveTimeScale(animationSpeed);
+        newAction.setEffectiveWeight(1);
+        newAction.play();
+      } else {
+        newAction.enabled = true;
+        newAction.setEffectiveTimeScale(animationSpeed);
+        newAction.setEffectiveWeight(1);
+        newAction.play();
+        if (vrm.springBoneManager) {
+          vrm.springBoneManager.reset();
+        }
+      }
+
+      activeActionsRef.current[channel] = { action: newAction, clip };
+      playingRef.current = true;
+      hasCompletedRef.current = false;
+      hasTriggeredLoopPreventionRef.current = false;
+    },
+    [vrm, transitionDuration, animationSpeed, getOrCreateAction, onAnimationComplete]
+  );
 
   const pause = useCallback(() => {
     playingRef.current = false;
-    if (activeActionRef.current) {
-      activeActionRef.current.action.paused = true;
-    }
+    Object.values(activeActionsRef.current).forEach((act) => {
+      if (act) act.action.paused = true;
+    });
   }, []);
 
   const resume = useCallback(() => {
     playingRef.current = true;
-    if (activeActionRef.current) {
-      activeActionRef.current.action.paused = false;
-    }
+    Object.values(activeActionsRef.current).forEach((act) => {
+      if (act) act.action.paused = false;
+    });
   }, []);
 
   const stop = useCallback(() => {
     playingRef.current = false;
-    if (activeActionRef.current) {
-      activeActionRef.current.action.stop();
-    }
+    Object.values(activeActionsRef.current).forEach((act) => {
+      if (act) act.action.stop();
+    });
   }, []);
 
   useFrame((_, delta) => {
@@ -178,24 +254,35 @@ export const useVrmAnimationPlayer = ({
       vrm.update(delta);
     }
 
+    // Giới hạn weight cho mọi action lower body (bao gồm action cũ đang fade out) để tránh rung mạnh khi driven bởi nhạc.
+    // Không clamp các clip mixed (upper+lower) để tránh ảnh hưởng upper.
+    actionsCache.current.forEach((action) => {
+      const clip = action.getClip();
+      const bodyPart = (clip as any)?.userData?.bodyPart;
+      if (bodyPart === 'lower' && action.getEffectiveWeight() > LOWER_BODY_MAX_WEIGHT) {
+        action.setEffectiveWeight(LOWER_BODY_MAX_WEIGHT);
+      }
+    });
+
     // Logic xử lý loop repeat prevention và notification
-    if (
-      mixerRef.current &&
-      playingRef.current &&
-      activeActionRef.current &&
-      !hasTriggeredLoopPreventionRef.current &&
-      onLoopAboutToRepeat
-    ) {
-      const action = activeActionRef.current.action;
-      const clip = activeActionRef.current.clip;
-      const effectiveWeight = action.getEffectiveWeight();
+    if (mixerRef.current && playingRef.current && !hasTriggeredLoopPreventionRef.current && onLoopAboutToRepeat) {
+      const primary =
+        activeActionsRef.current.full || activeActionsRef.current.upper || activeActionsRef.current.lower;
+      if (primary) {
+        const action = primary.action;
+        const clip = primary.clip;
+        const effectiveWeight = action.getEffectiveWeight();
 
-      if (action.loop === THREE.LoopRepeat && effectiveWeight > 0.9) {
-        const timeUntilEnd = clip.duration - (action.time % clip.duration);
+        if (action.loop === THREE.LoopRepeat && effectiveWeight > 0.9) {
+          const duration = getEffectiveDuration(clip);
+          const timeUntilEnd = duration - (action.time % duration);
+          // Giảm khả năng chuyển sớm: lấy min(ngưỡng cấu hình, 5% thời lượng), có sàn 0.05s
+          const dynamicThreshold = Math.min(loopPreventionThreshold, Math.max(0.05, duration * 0.05));
 
-        if (timeUntilEnd <= loopPreventionThreshold && timeUntilEnd > 0) {
-          hasTriggeredLoopPreventionRef.current = true;
-          onLoopAboutToRepeat();
+          if (timeUntilEnd <= dynamicThreshold && timeUntilEnd > 0) {
+            hasTriggeredLoopPreventionRef.current = true;
+            onLoopAboutToRepeat();
+          }
         }
       }
     }
@@ -207,6 +294,10 @@ export const useVrmAnimationPlayer = ({
     resume,
     stop,
     isPlaying: playingRef.current,
-    currentTime: activeActionRef.current?.action.time || 0,
+    currentTime:
+      activeActionsRef.current.full?.action.time ||
+      activeActionsRef.current.upper?.action.time ||
+      activeActionsRef.current.lower?.action.time ||
+      0,
   };
 };

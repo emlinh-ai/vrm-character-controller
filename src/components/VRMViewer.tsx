@@ -8,16 +8,21 @@ import type { VRMViewerProps, VRMModelRef } from '../types';
  * Sử dụng bên trong Canvas từ @react-three/fiber
  */
 const VRMViewer: React.FC<VRMViewerProps> = ({
-  vrmUrl = 'emlinh-vroid-1.1.vrm',
+  vrmUrl = 'emlinhv3.vrm',
   basePath = 'models',
   isAISpeaking = false,
   audioVolume = 0,
   audioCurrentTime = 0,
   audioDuration = 0,
   emotion = 'neutral',
+  eyeClosure = 0,
+  visemeId = null,
   activeAnimationId = null,
   activeAnimationToken,
   onReadyToTalk,
+  onLoadComplete,
+  onAnimationEnd,
+  onLoopAboutToRepeat,
   kiss = 0,
   lipsClosed = 0,
   jaw = 0,
@@ -25,6 +30,10 @@ const VRMViewer: React.FC<VRMViewerProps> = ({
   rotation = [0, -1.75 / Math.PI, 0],
   scale = 1,
   lightIntensity = 1,
+  transitionDuration = 0.5,
+  idleTransitionDuration = 1.0,
+  animationSpeed = 1.0,
+  emotionStrength = 1.0,
   onPointerOver,
   onPointerOut,
   onPointerDown,
@@ -46,7 +55,8 @@ const VRMViewer: React.FC<VRMViewerProps> = ({
   useEffect(() => {
     if (!vrmModelRef.current || !activeAnimationId) return;
 
-    vrmModelRef.current.playAnimationById(activeAnimationId, false);
+    // Không ép loop = false để idle có thể tự loop theo category
+    vrmModelRef.current.playAnimationById(activeAnimationId);
   }, [activeAnimationId, activeAnimationToken]);
 
   return (
@@ -58,9 +68,6 @@ const VRMViewer: React.FC<VRMViewerProps> = ({
         rotation={rotation} 
         scale={scale}
         onPointerOver={onPointerOver}
-        onPointerOut={onPointerOut}
-        onPointerDown={onPointerDown}
-        onPointerUp={onPointerUp}
       >
         <VRMModel
           ref={vrmModelRef}
@@ -71,11 +78,21 @@ const VRMViewer: React.FC<VRMViewerProps> = ({
           audioDuration={audioDuration}
           isAudioPlaying={isAISpeaking}
           emotion={emotion}
+          eyeClosure={eyeClosure}
+          visemeId={visemeId || undefined}
           onReadyToTalk={onReadyToTalk}
+          onLoadComplete={onLoadComplete}
+          onAnimationEnd={onAnimationEnd}
+          onLoopAboutToRepeat={onLoopAboutToRepeat}
           kiss={kiss}
           lipsClosed={lipsClosed}
           jaw={jaw}
           animationRegistry={animationRegistry}
+          activeAnimationId={activeAnimationId}
+          transitionDuration={transitionDuration}
+          idleTransitionDuration={idleTransitionDuration}
+          animationSpeed={animationSpeed}
+          emotionStrength={emotionStrength}
         />
       </group>
     </>
