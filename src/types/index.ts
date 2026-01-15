@@ -17,6 +17,7 @@ export interface AnimationDefinition {
   readonly endFrame?: number;
   readonly totalFrames?: number;
   readonly bodyPart?: AnimationBodyPart;
+  readonly seamless?: boolean;
 }
 
 // VRM Model Props
@@ -77,10 +78,20 @@ export interface VRMViewerProps {
   scale?: number;
   lightIntensity?: number;
   backgroundImageUrl?: string;
+  backgroundVideoUrl?: string;
   backgroundPosition?: [number, number, number];
   backgroundShadowOpacity?: number;
   backgroundSize?: [number, number];
   backgroundLightPosition?: [number, number, number];
+  // Environment model
+  environmentModelUrl?: string;
+  environmentBasePath?: string;
+  environmentPosition?: [number, number, number];
+  environmentRotation?: [number, number, number];
+  environmentScale?: number;
+  environmentCastShadow?: boolean;
+  environmentReceiveShadow?: boolean;
+  environmentControlsLabel?: string;
   // Animation transition settings
   transitionDuration?: number;
   idleTransitionDuration?: number;
@@ -97,6 +108,17 @@ export interface VRMViewerProps {
 
 export interface VRMModelProps extends VRMViewerProps {
   isAudioPlaying?: boolean;
+}
+
+export interface EnvironmentModelProps {
+  modelUrl: string;
+  basePath?: string;
+  position?: [number, number, number];
+  rotation?: [number, number, number];
+  scale?: number;
+  castShadow?: boolean;
+  receiveShadow?: boolean;
+  controlsLabel?: string;
 }
 
 // Animation Loader Types

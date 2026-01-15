@@ -207,6 +207,10 @@ export const useVrmAnimationLoader = (
           if (animDef.bodyPart) {
             userData.bodyPart = animDef.bodyPart;
           }
+          if (animDef.seamless !== undefined) {
+            userData.isSeamless = animDef.seamless;
+            userData.seamless = animDef.seamless;
+          }
           (clip as any).userData = userData;
         }
 

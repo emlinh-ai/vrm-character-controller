@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useRef, useEffect } from 'react';
-import { useTexture } from '@react-three/drei';
-import { useControls } from 'leva';
+import { useThree } from '@react-three/fiber';
 import VRMModel from './VRMModel';
+import BackgroundBackdrop from './BackgroundBackdrop';
+import EnvironmentModel from './EnvironmentModel';
 import type { VRMViewerProps, VRMModelRef } from '../types';
 
 /**
@@ -31,12 +32,20 @@ const VRMViewer: React.FC<VRMViewerProps> = ({
   position = [0.55, -1.25, 0],
   rotation = [0, -1.75 / Math.PI, 0],
   scale = 1,
-  backgroundImageUrl = '/assets/images/background-studio.jpg',
+  backgroundVideoUrl = '/assets/video/river-background.mp4',
   backgroundPosition = [0, 0.75, -0.9],
-  backgroundSize = [6, 3.5],
+  backgroundSize = [6, 3.4],
   backgroundShadowOpacity = 0.35,
-  backgroundLightPosition = [9, 10, 6],
+  backgroundLightPosition = [-9, 10, 6],
   lightIntensity = 1,
+  environmentModelUrl,
+  environmentBasePath,
+  environmentPosition = [0, -0.5, 0],
+  environmentRotation = [0, -1, 0],
+  environmentScale = 1,
+  environmentCastShadow = true,
+  environmentReceiveShadow = true,
+  environmentControlsLabel = 'Environment 3D',
   transitionDuration = 0.5,
   idleTransitionDuration = 1.0,
   animationSpeed = 1.0,
@@ -48,13 +57,7 @@ const VRMViewer: React.FC<VRMViewerProps> = ({
   animationRegistry = {},
 }) => {
   const vrmModelRef = useRef<VRMModelRef>(null);
-  const backgroundTexture = useTexture(backgroundImageUrl);
-  const backgroundControls = useControls('Background', {
-    position: { value: backgroundPosition, step: 0.01 },
-    size: { value: backgroundSize, step: 0.1 },
-    shadowOpacity: { value: backgroundShadowOpacity, min: 0, max: 1, step: 0.01 },
-    lightPosition: { value: backgroundLightPosition, step: 0.1 },
-  });
+  const { camera } = useThree();
 
   useEffect(() => {
     if (vrmModelRef.current) {
@@ -73,33 +76,54 @@ const VRMViewer: React.FC<VRMViewerProps> = ({
     vrmModelRef.current.playAnimationById(activeAnimationId);
   }, [activeAnimationId, activeAnimationToken]);
 
+  const hasEnvironmentModel = Boolean(environmentModelUrl);
+
   return (
     <>
-      <group position={backgroundControls.position as [number, number, number]}>
-        <mesh>
-          <planeGeometry args={backgroundControls.size as [number, number]} />
-          <meshBasicMaterial map={backgroundTexture} toneMapped={false} />
-        </mesh>
-        <mesh position={[0, 0, 0.01]} receiveShadow>
-          <planeGeometry args={backgroundControls.size as [number, number]} />
-          <shadowMaterial transparent opacity={backgroundControls.shadowOpacity as number} />
-        </mesh>
-      </group>
-      <ambientLight intensity={lightIntensity * 0.7} />
-      <directionalLight
-        position={backgroundControls.lightPosition as [number, number, number]}
-        intensity={lightIntensity}
-        castShadow
-        shadow-mapSize-width={1024}
-        shadow-mapSize-height={1024}
-        shadow-bias={-0.0005}
-        shadow-camera-left={-8}
-        shadow-camera-right={8}
-        shadow-camera-top={8}
-        shadow-camera-bottom={-8}
-        shadow-camera-near={1}
-        shadow-camera-far={30}
-      />
+      {!hasEnvironmentModel && (
+        <BackgroundBackdrop
+          videoUrl={backgroundVideoUrl}
+          position={backgroundPosition}
+          size={backgroundSize}
+          shadowOpacity={backgroundShadowOpacity}
+          lightPosition={backgroundLightPosition}
+          lightIntensity={lightIntensity}
+        />
+      )}
+      {hasEnvironmentModel && environmentModelUrl && (
+        <>
+          <EnvironmentModel
+            modelUrl={environmentModelUrl}
+            basePath={environmentBasePath}
+            position={environmentPosition}
+            rotation={environmentRotation}
+            scale={environmentScale}
+            castShadow={environmentCastShadow}
+            receiveShadow={environmentReceiveShadow}
+            controlsLabel={environmentControlsLabel}
+          />
+          <ambientLight intensity={lightIntensity * 0.9} />
+          <hemisphereLight
+            intensity={lightIntensity * 0.6}
+            color="#ffffff"
+            groundColor="#7a7a7a"
+          />
+          <directionalLight
+            position={[camera.position.x, camera.position.y, camera.position.z]}
+            intensity={lightIntensity * 1.2}
+            castShadow
+            shadow-mapSize-width={1024}
+            shadow-mapSize-height={1024}
+            shadow-bias={-0.0005}
+            shadow-camera-left={-8}
+            shadow-camera-right={8}
+            shadow-camera-top={8}
+            shadow-camera-bottom={-8}
+            shadow-camera-near={1}
+            shadow-camera-far={30}
+          />
+        </>
+      )}
       <group
         position={position}
         rotation={rotation}

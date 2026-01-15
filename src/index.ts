@@ -1,6 +1,7 @@
 // Components
 export { default as VRMViewer } from './components/VRMViewer';
 export { default as VRMModel } from './components/VRMModel';
+export { default as EnvironmentModel } from './components/EnvironmentModel';
 
 // Hooks
 export { useVrmBlink } from './hooks/useVrmBlink';
@@ -38,6 +39,7 @@ export type {
   VRMModelProps,
   VRMModelRef,
   VRMViewerProps,
+  EnvironmentModelProps,
   AnimationCache,
   LoadingState,
   UseVrmAnimationLoaderReturn,
